@@ -1,0 +1,3 @@
+[submodule "covid-spike-classification"]
+	path = covid-spike-classification
+	url = git@github.com:cmkobel/covid-spike-classification.git
