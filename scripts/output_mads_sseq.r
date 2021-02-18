@@ -212,7 +212,7 @@ out = twin_called %>%
                                                Sseq_E484K == "negativ" & Sseq_N501Y == "negativ" &                           Sseq_P681H == "negativ" ~ "Sseq: S:N501Y1 mutation",
                                                Sseq_E484K == "negativ" & Sseq_N501Y == "negativ" & Sseq_Q677H == "negativ" & Sseq_P681H == "negativ" ~ "Sseq: Forenelig med oprindelig variant",
                                                TRUE                                                                                                  ~ "Sseq: inkonklusiv"),
-           Sseq_smitsomhed = case_when(Sseq_variantbeskrivelse == "Sseq: inkonklusiv"                ~ "Prøven er ikke sekvenserbar",
+           Sseq_smitsomhed = case_when(Sseq_variantbeskrivelse == "Sseq: inkonklusiv"                     ~ "Prøven er ikke sekvenserbar",
                                        Sseq_variantbeskrivelse == "Sseq: Forenelig med B.1.1.7"           ~ "Variant med øget smitsomhed",
                                        Sseq_variantbeskrivelse == "Sseq: Forenelig med B.1.351 eller P.1" ~ "Variant med øget smitsomhed og nedsat følsomhed for antistoffer",
                                        Sseq_variantbeskrivelse == "Sseq: Forenelig med B.1.525"           ~ "Variant med nedsat følsomhed for antistoffer",
