@@ -48,7 +48,7 @@ rule all:
 
 rule start:
     input:
-        "input/{batch}.tsv"
+        "input/{batch}.xls"
     output:
         ab1_dir = directory("output/{batch}/ab1"),
         final = "output/{batch}/csc/{batch}_results.csv"

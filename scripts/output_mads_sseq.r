@@ -20,15 +20,17 @@ csc_results = args[2]
 
 
 devel = F
-# rm(list = ls()); devel = T
+# devel = T
 
 
 if (devel) {
+    rm(list = ls())
+    devel = T
     
-    batch = "210216"
+    arg_batch = "210216"
     
-    metadata_file = paste0("~/GenomeDK/clinmicrocore/sanger/input/", batch, ".xls")
-    csc_results_file = paste0("~/GenomeDK/clinmicrocore/sanger/output/", batch, "/csc/", batch, "_results.csv")
+    metadata_file = paste0("~/GenomeDK/clinmicrocore/sanger/input/", arg_batch, ".xls")
+    csc_results_file = paste0("~/GenomeDK/clinmicrocore/sanger/output/", arg_batch, "/csc/", arg_batch, "_results.csv")
     
 }
 
@@ -70,6 +72,7 @@ metadata = metadata_read %>%
     select(kma_ya_sample_name, kma_raw_sample_name, ef_sample_name, primer = Primer, type)
 
 
+
     
 
 
@@ -84,11 +87,12 @@ results = results_read %>%
     
 
 
-    # Prefix variant-position-columns with "pos_"
+    # Prefix variant-position-columns with "Sseq_"
     # Be aware that this call is dependent on the number, and ordering of columns
     # The forth column should be the leftmost variant column.
     rename_at(.vars = vars(4:last_col()),
-              .funs = ~ paste0("pos_", .x))
+              .funs = ~ paste0("Sseq_", .x))
+
 
 
 # Join the data together
@@ -100,37 +104,150 @@ joined = metadata %>%
     #group_by(kma_ya_sample_name, type, comment) %>% 
     #mutate(rank = row_number(primer)) 
 
+
+
+
+# Make sure to add all columns
+
+# Define position of interest
+poi = c("Sseq_E484K", "Sseq_N501Y", "Sseq_Q677H", "Sseq_P681H")
+
+
+dummy = tibble(nas = c(NA), cols_ = poi) %>% 
+    pivot_wider(names_from = cols_, values_from = nas) %>% 
+    mutate(kma_ya_sample_name = "dummy") %>% 
+    select(kma_ya_sample_name, everything())
+    
+# add dummy records for keeping all relevant variants 
+# dummy = tibble(kma_ya_sample_name = "dummy-sample",
+#                type = "dummy",
+#                position = poi)
+
+
+
+# Trying a new approach. Long-pivoting the joined-table immediately:
+twin_called = joined %>% 
+    select(kma_ya_sample_name, ef_sample_name, type, primer, starts_with("Sseq_")) %>%
+  
+    # Add dummy data to ensure that all poi columns will be present
+    bind_rows(tibble(kma_ya_sample_name = "dummy", type = "dummy", primer = "4826_L")) %>% 
+    left_join(dummy, by = "kma_ya_sample_name", suffix = c("", "_dummy")) %>% 
+    select(-ends_with("_dummy")) %>% 
+
+    pivot_longer(starts_with("Sseq_"), names_to = "position", values_to = "call") %>% 
+
+  
+    # Recode the calls 
+    mutate(call = recode(call, "0" = "negativ", "1" = "positiv")) %>% # hold ikke-kaldte som NA, så man senere kan coalesce den første kaldte værdi.
+    
+    # Have a look
+    #arrange(kma_ya_sample_name, position) %>% View
+  
+    # pivot left and right out to two columns
+    #mutate(both = paste(position, primer)) %>% 
+    pivot_wider(id_cols = c(kma_ya_sample_name, position, type), names_from = primer, values_from = call) %>% 
+     
+    # Have a look
+    #View
+  
+    # Now call the variants using both directions
+    mutate(twin_call = case_when(`4826_L` == `4826_R` ~ `4826_L`,
+                                 is.na(`4826_L`) | is.na(`4826_R`) ~ coalesce(`4826_L`, `4826_R`, "inkonklusiv_begge"),
+                                 TRUE ~ "inkonklusiv_forskellig"))
+  
+    # 
+    # 
+    # group_by(kma_ya_sample_name, name) %>% 
+    # summarize(paste(value, collapse = ", ")) %>% 
+    # 
+    # View
+
+
+
+
+
+# TODO: Warn about non-passing negative controls
+
+
+
+
+
+
+# Warn about differing cals between the two directions
+inc_differing = twin_called %>% filter(twin_call == "inkonklusiv_forskellig")
+if (nrow(inc_differing) > 0) {
+  write(paste("Warning: discrepancies beween the two directions in the following samples:\n",
+              paste(inc_differing %>% pull(kma_ya_sample_name), collapse = "\t")), stderr())
+}
+
+
+
+# 
+# definition = tribble(
+#   ~Sseq_variantbeskrivelse, ~Sseq_smitsomhed, ~Sseq_E848K, ~
+
+
+
+out = twin_called %>% 
+
+  
+    # Homogenize inconclusives
+    mutate(twin_call = if_else(str_detect(twin_call, "inkonklusiv"), "inkonklusiv", twin_call)) %>% 
+  
+    # Pivot back to wide to combine multiple positions per sample
+    pivot_wider(id_cols = c(kma_ya_sample_name, type), names_from = position, values_from = twin_call) %>% 
+    filter(type != "dummy") %>% 
+  
+    # Pick out the positions of interest
+    select(`sample-id` = kma_ya_sample_name, type, all_of(poi)) %>% 
+  
     
     
 
-# Check out discrepancies:
-joined %>% 
-    summarize_at(vars(starts_with("pos_"), ef_sample_name), ~ list(unique(.x))) %>% View
+    # Now add the overall calls
+    mutate(Sseq_variantbeskrivelse = case_when(Sseq_E484K == "negativ" & Sseq_N501Y == "positiv" & Sseq_Q677H == "negativ" & Sseq_P681H == "positiv" ~ "Sseq: Forenelig med B.1.1.7",
+                                               Sseq_E484K == "positiv" & Sseq_N501Y == "positiv" & Sseq_Q677H == "negativ" & Sseq_P681H == "negativ" ~ "Sseq: Forenelig med B.1.351 eller P.1",
+                                               Sseq_E484K == "positiv" & Sseq_N501Y == "negativ" & Sseq_Q677H == "positiv" & Sseq_P681H == "negativ" ~ "Sseq: Forenelig med B.1.525",
+                                               Sseq_E484K == "positiv" & Sseq_N501Y == "negativ" &                           Sseq_P681H == "negativ" ~ "Sseq: S:E484K mutation",
+                                               Sseq_E484K == "negativ" & Sseq_N501Y == "negativ" &                           Sseq_P681H == "negativ" ~ "Sseq: S:N501Y1 mutation",
+                                               Sseq_E484K == "negativ" & Sseq_N501Y == "negativ" & Sseq_Q677H == "negativ" & Sseq_P681H == "negativ" ~ "Sseq: Forenelig med oprindelig variant",
+                                               TRUE                                                                                                  ~ "Sseq: inkonklusiv"),
+           Sseq_smitsomhed = case_when(Sseq_variantbeskrivelse == "Sseq: inkonklusiv"                ~ "Prøven er ikke sekvenserbar",
+                                       Sseq_variantbeskrivelse == "Sseq: Forenelig med B.1.1.7"           ~ "Variant med øget smitsomhed",
+                                       Sseq_variantbeskrivelse == "Sseq: Forenelig med B.1.351 eller P.1" ~ "Variant med øget smitsomhed og nedsat følsomhed for antistoffer",
+                                       Sseq_variantbeskrivelse == "Sseq: Forenelig med B.1.525"           ~ "Variant med nedsat følsomhed for antistoffer",
+                                       Sseq_variantbeskrivelse == "Sseq: S:E484K mutation"                ~ "Variant med øget smitsomhed",
+                                       Sseq_variantbeskrivelse == "Sseq: S:N501Y1 mutation"               ~ "Variant med øget smitsomhed")) %>% 
+  
+    
+    
 
 
+    mutate(MDSU = "32092")
+  
+    # Have a look before pivoting
+    
+      
 
-# If you are happy with the discrepancies, you may proceed:
-joined %>% 
-    mutate_at(vars(starts_with("pos_")), ~  na.omit(.x)) %>% View
+  
+
+
+out %>% 
+  
+  pivot_longer(c(Sseq_variantbeskrivelse, Sseq_smitsomhed, starts_with("Sseq_"))) %>% 
+  
+  filter(type == "sample") %>% 
+  select(-type) %>% 
+  write.table(paste0("~/GenomeDK/clinmicrocore/pipe19/batch/mads/output/32092_Sseq_", arg_batch, ".csv"), sep = ";", fileEncoding = "cp1252")  # TODO: set output path for args
+
+
     
 
 
 
-# Inform about missing data
-missing_data = anti_join(metadata, results)
-write(paste0("Number of KMA samples missing from EF data: ", nrow(missing_data), "\n",
-            paste(c(" ~KMA:", missing_data$kma_raw_sample_name),
-                  c("~EF:", missing_data$ef_sample),
-                  collapse = "\n"), "\n"),
-      stderr())
 
 
-
-
-# Write the joined data out
-joined %>% write_tsv(paste0("~/GenomeDK/clinmicrocore/sanger/output/", batch, "_joined.tsv")) %>% 
-
-    
+identity
 
 
 
@@ -140,13 +257,38 @@ joined %>% write_tsv(paste0("~/GenomeDK/clinmicrocore/sanger/output/", batch, "_
 
 
 
-# Format the data for mads.
 
-# 1: open the example sent to lene/helge
-# 2: open the varianttable from ssi
-joined %>% 
-    
-    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
     
     
