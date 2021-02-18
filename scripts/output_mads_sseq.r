@@ -1,5 +1,7 @@
-####################################################################
-# This script takes a batch where a xls with the columns
+###################################################################################
+# This script takes an xls with the columns "Originalnr.", "Primer" and "Rør nr",
+# and a table with the results of the csc-program.
+# The tables are joined and ultimately output i a format compatible with mads.
 
 
 library(tidyverse)
@@ -12,8 +14,9 @@ write("", stderr())
 
 # Read cli-args
 #batch = args[1]
-csc_results = args[1]
-metadata_file = args[2]
+metadata_file = args[1]
+csc_results = args[2]
+
 
 
 devel = F
@@ -23,6 +26,7 @@ devel = F
 if (devel) {
     
     batch = "210216"
+    
     metadata_file = paste0("~/GenomeDK/clinmicrocore/sanger/input/", batch, ".xls")
     csc_results_file = paste0("~/GenomeDK/clinmicrocore/sanger/output/", batch, "/csc/", batch, "_results.csv")
     
@@ -80,21 +84,21 @@ results = results_read %>%
     
 
 
-    
-    # Be aware that this call is dependent on the number and ordering of columns
+    # Prefix variant-position-columns with "pos_"
+    # Be aware that this call is dependent on the number, and ordering of columns
     # The forth column should be the leftmost variant column.
     rename_at(.vars = vars(4:last_col()),
               .funs = ~ paste0("pos_", .x))
 
 
-
+# Join the data together
 joined = metadata %>% 
     left_join(results, by = "ef_sample_name") %>% 
-    arrange(kma_ya_sample_name) %>% 
+    arrange(kma_ya_sample_name)
     
-    # Mark duplicates
-    group_by(kma_ya_sample_name, type, comment) %>% 
-    mutate(rank = row_number(primer)) 
+    # Mark the overlapping samples
+    #group_by(kma_ya_sample_name, type, comment) %>% 
+    #mutate(rank = row_number(primer)) 
 
     
     
