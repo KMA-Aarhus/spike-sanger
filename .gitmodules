@@ -1,0 +1,3 @@
+[submodule "covid-spike-classification"]
+	path = covid-spike-classification
+	url = https://github.com/kblin/covid-spike-classification.git
