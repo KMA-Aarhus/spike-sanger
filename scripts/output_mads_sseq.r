@@ -27,7 +27,7 @@ if (devel) {
     rm(list = ls())
     devel = T
     
-    arg_batch = "210216"
+    arg_batch = "210214"
     
     metadata_file = paste0("~/GenomeDK/clinmicrocore/sanger/input/", arg_batch, ".xls")
     csc_results_file = paste0("~/GenomeDK/clinmicrocore/sanger/output/", arg_batch, "/csc/", arg_batch, "_results.csv")
@@ -42,8 +42,11 @@ metadata_read = readxl::read_excel(metadata_file, sheet = 1, na = c("", "?"))
 
 metadata_read %>% glimpse
 metadata = metadata_read %>% 
-    select(kma_raw_sample_name = `Originalnr.`, Primer, ef_sample_name = `Rør nr`) %>% 
+    select(kma_raw_sample_name = `Originalnr.`, primer_raw = Primer, ef_sample_name = `Rør nr`) %>% 
     filter(!is.na(kma_raw_sample_name)) %>% 
+    mutate(primer = case_when(str_detect(primer_raw, "^L-") ~ "left_primer",
+                              str_detect(primer_raw, "^R-") ~ "right_primer"),
+           plate = str_extract(primer_raw, "\\d+$")) %>%
 
     # Mark the sample type
     # Should be synced with pipe19/scripts/parse_path.r:
@@ -69,7 +72,7 @@ metadata = metadata_read %>%
                                     paste0(kma_raw_sample_name))) %>% 
     ungroup() %>% 
     
-    select(kma_ya_sample_name, kma_raw_sample_name, ef_sample_name, primer = Primer, type)
+    select(kma_ya_sample_name, kma_raw_sample_name, ef_sample_name, plate, primer, type)
 
 
 
@@ -77,8 +80,10 @@ metadata = metadata_read %>%
 
 
 
+# Define position of interest
+poi = c("Sseq_E484K", "Sseq_N501Y", "Sseq_Q677H", "Sseq_P681H")
 
-
+# Read csc-results
 results_read = read_csv(csc_results_file, col_types = cols(.default = "c")) 
 results_read %>% glimpse
 results = results_read %>% 
@@ -91,7 +96,10 @@ results = results_read %>%
     # Be aware that this call is dependent on the number, and ordering of columns
     # The forth column should be the leftmost variant column.
     rename_at(.vars = vars(4:last_col()),
-              .funs = ~ paste0("Sseq_", .x))
+              .funs = ~ paste0("Sseq_", .x)) %>% 
+  
+    # To make matters simpler, we're only interested in keeping the poi columns.
+    select(ef_sample_name, ef_raw_sample_name, comment, all_of(poi))
 
 
 
@@ -109,10 +117,10 @@ joined = metadata %>%
 
 # Make sure to add all columns
 
-# Define position of interest
-poi = c("Sseq_E484K", "Sseq_N501Y", "Sseq_Q677H", "Sseq_P681H")
 
 
+# This dummy will make sure that missing columns are added. 
+# Should only be a problem when csc doesn't support the variants that SSI defines necessary.
 dummy = tibble(nas = c(NA), cols_ = poi) %>% 
     pivot_wider(names_from = cols_, values_from = nas) %>% 
     mutate(kma_ya_sample_name = "dummy") %>% 
@@ -127,32 +135,35 @@ dummy = tibble(nas = c(NA), cols_ = poi) %>%
 
 # Trying a new approach. Long-pivoting the joined-table immediately:
 twin_called = joined %>% 
-    select(kma_ya_sample_name, ef_sample_name, type, primer, starts_with("Sseq_")) %>%
+    select(kma_ya_sample_name, plate, type, primer, starts_with("Sseq_")) %>%
   
     # Add dummy data to ensure that all poi columns will be present
-    bind_rows(tibble(kma_ya_sample_name = "dummy", type = "dummy", primer = "4826_L")) %>% 
+    bind_rows(tibble(kma_ya_sample_name = "dummy", type = "dummy", primer = "left_primer")) %>% 
     left_join(dummy, by = "kma_ya_sample_name", suffix = c("", "_dummy")) %>% 
     select(-ends_with("_dummy")) %>% 
 
     pivot_longer(starts_with("Sseq_"), names_to = "position", values_to = "call") %>% 
+  
 
+    
   
     # Recode the calls 
     mutate(call = recode(call, "0" = "negativ", "1" = "positiv")) %>% # hold ikke-kaldte som NA, så man senere kan coalesce den første kaldte værdi.
     
+    
     # Have a look
-    #arrange(kma_ya_sample_name, position) %>% View
+    arrange(kma_ya_sample_name, position) %>% 
   
     # pivot left and right out to two columns
     #mutate(both = paste(position, primer)) %>% 
-    pivot_wider(id_cols = c(kma_ya_sample_name, position, type), names_from = primer, values_from = call) %>% 
+    pivot_wider(id_cols = c(kma_ya_sample_name, plate, position, type), names_from = primer, values_from = call) %>% 
      
     # Have a look
     #View
   
     # Now call the variants using both directions
-    mutate(twin_call = case_when(`4826_L` == `4826_R` ~ `4826_L`,
-                                 is.na(`4826_L`) | is.na(`4826_R`) ~ coalesce(`4826_L`, `4826_R`, "inkonklusiv_begge"),
+    mutate(twin_call = case_when(`left_primer` == `right_primer` ~ `left_primer`,
+                                 is.na(`left_primer`) | is.na(`right_primer`) ~ coalesce(`left_primer`, `right_primer`, "inkonklusiv_begge"),
                                  TRUE ~ "inkonklusiv_forskellig"))
   
     # 
@@ -192,10 +203,10 @@ out = twin_called %>%
 
   
     # Homogenize inconclusives
-    mutate(twin_call = if_else(str_detect(twin_call, "inkonklusiv"), "inkonklusiv", twin_call)) %>% 
+    mutate(twin_call = if_else(str_detect(twin_call, "inkonklusiv"), "inkonklusiv", twin_call)) %>%
   
     # Pivot back to wide to combine multiple positions per sample
-    pivot_wider(id_cols = c(kma_ya_sample_name, type), names_from = position, values_from = twin_call) %>% 
+    pivot_wider(id_cols = c(kma_ya_sample_name, plate, type), names_from = position, values_from = twin_call) %>% 
     filter(type != "dummy") %>% 
   
     # Pick out the positions of interest
@@ -205,20 +216,14 @@ out = twin_called %>%
     
 
     # Now add the overall calls
-    mutate(Sseq_variantbeskrivelse = case_when(Sseq_E484K == "negativ" & Sseq_N501Y == "positiv" & Sseq_Q677H == "negativ" & Sseq_P681H == "positiv" ~ "Spike: Forenelig med B.1.1.7 ",
-                                               Sseq_E484K == "positiv" & Sseq_N501Y == "positiv" & Sseq_Q677H == "negativ" & Sseq_P681H == "negativ" ~ "Spike: Forenelig med B.1.351 eller P.1 ",
-                                               Sseq_E484K == "positiv" & Sseq_N501Y == "negativ" & Sseq_Q677H == "positiv" & Sseq_P681H == "negativ" ~ "Spike: Forenelig med B.1.525 ",
-                                               Sseq_E484K == "positiv" & Sseq_N501Y == "negativ" &                           Sseq_P681H == "negativ" ~ "Spike: E484K mutation ",
-                                               Sseq_E484K == "negativ" & Sseq_N501Y == "positiv" &                           Sseq_P681H == "negativ" ~ "Spike: N501Y mutation ",
-                                               Sseq_E484K == "negativ" & Sseq_N501Y == "negativ" & Sseq_Q677H == "negativ" & Sseq_P681H == "negativ" ~ "Spike: Forenelig med oprindelig variant ",
-                                               TRUE                                                                                                  ~ "Spike: inkonklusiv "),
-           Sseq_smitsomhed = case_when(Sseq_variantbeskrivelse == "Spike: inkonklusiv "                      ~ "Prøven er ikke sekventerbar",
-                                       Sseq_variantbeskrivelse == "Spike: Forenelig med B.1.1.7 "            ~ "Variant med øget smitsomhed",
-                                       Sseq_variantbeskrivelse == "Spike: Forenelig med B.1.351 eller P.1 "  ~ "Variant med øget smitsomhed og nedsat følsomhed for antistoffer",
-                                       Sseq_variantbeskrivelse == "Spike: Forenelig med B.1.525 "            ~ "Variant med nedsat følsomhed for antistoffer",
-                                       Sseq_variantbeskrivelse == "Spike: E484K mutation "                   ~ "Variant med øget smitsomhed",
-                                       Sseq_variantbeskrivelse == "Spike: N501Y mutation "                   ~ "Variant med øget smitsomhed",
-                                       Sseq_variantbeskrivelse == "Spike: Forenelig med oprindelig variant " ~ "")) %>% 
+    mutate(Sseq = case_when(Sseq_E484K == "negativ" & Sseq_N501Y == "positiv" & Sseq_Q677H == "negativ" & Sseq_P681H == "positiv" ~ "Spike: Forenelig med B.1.1.7|Variant med øget smitsomhed",
+                            Sseq_E484K == "positiv" & Sseq_N501Y == "positiv" & Sseq_Q677H == "negativ" & Sseq_P681H == "negativ" ~ "Spike: Forenelig med B.1.351 eller P.1|Variant med øget smitsomhed og nedsat følsomhed for antistoffer",
+                            Sseq_E484K == "positiv" & Sseq_N501Y == "negativ" & Sseq_Q677H == "positiv" & Sseq_P681H == "negativ" ~ "Spike: Forenelig med B.1.525|Variant med nedsat følsomhed for antistoffer",
+                            Sseq_E484K == "positiv" & Sseq_N501Y == "negativ" &                           Sseq_P681H == "negativ" ~ "Spike: E484K mutation|Variant med nedsat følsomhed for antistoffer",
+                            Sseq_E484K == "negativ" & Sseq_N501Y == "positiv" &                           Sseq_P681H == "negativ" ~ "Spike: N501Y mutation|Variant med øget smitsomhed",
+                            Sseq_E484K == "negativ" & Sseq_N501Y == "negativ" & Sseq_Q677H == "negativ" & Sseq_P681H == "negativ" ~ "Spike: Forenelig med oprindelig variant|",
+                            TRUE                                                                                                  ~ "Spike: inkonklusiv|Prøven er ikke sekventerbar")) %>% 
+    separate(Sseq, c("Sseq_variantbeskrivelse", "Sseq_smitsomhed"), sep = "\\|") %>%
   
     
     
@@ -239,6 +244,7 @@ out %>%
   
   filter(type == "sample") %>% 
   select(-type) %>% 
+  arrange(`sample-id`, name) %>% 
   write.table(paste0("~/GenomeDK/clinmicrocore/pipe19/batch/mads/output/32092_Sseq_", arg_batch, ".csv"), sep = ";", fileEncoding = "cp1252", row.names = F)   # TODO: set output path for args
 
 

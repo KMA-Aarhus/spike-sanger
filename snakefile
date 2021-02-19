@@ -69,7 +69,6 @@ rule start:
                 --reference {params.reference} \
                 -i ab1 \
                 --outdir output/{wildcards.batch}/csc \
-                --show-unexpected \
                 {output.ab1_dir}
 
         mv output/{wildcards.batch}/csc/results.csv {output.final}
