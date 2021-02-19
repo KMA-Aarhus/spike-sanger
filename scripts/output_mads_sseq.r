@@ -221,7 +221,7 @@ out = twin_called %>%
                             Sseq_E484K == "positiv" & Sseq_N501Y == "negativ" & Sseq_Q677H == "positiv" & Sseq_P681H == "negativ" ~ "Spike: Forenelig med B.1.525|Variant med nedsat følsomhed for antistoffer",
                             Sseq_E484K == "positiv" & Sseq_N501Y == "negativ" &                           Sseq_P681H == "negativ" ~ "Spike: E484K mutation|Variant med nedsat følsomhed for antistoffer",
                             Sseq_E484K == "negativ" & Sseq_N501Y == "positiv" &                           Sseq_P681H == "negativ" ~ "Spike: N501Y mutation|Variant med øget smitsomhed",
-                            Sseq_E484K == "negativ" & Sseq_N501Y == "negativ" & Sseq_Q677H == "negativ" & Sseq_P681H == "negativ" ~ "Spike: Forenelig med oprindelig variant|",
+                            Sseq_E484K == "negativ" & Sseq_N501Y == "negativ" & Sseq_Q677H == "negativ" & Sseq_P681H == "negativ" ~ "Spike: Forenelig med oprindelig variant|Variant med formodet normal smitsomhed",
                             TRUE                                                                                                  ~ "Spike: inkonklusiv|Prøven er ikke sekventerbar")) %>% 
     separate(Sseq, c("Sseq_variantbeskrivelse", "Sseq_smitsomhed"), sep = "\\|") %>%
   
@@ -235,7 +235,7 @@ out = twin_called %>%
     
       
 
-  
+#out %>% format_tsv
 
 
 out %>% 
@@ -244,8 +244,9 @@ out %>%
   
   filter(type == "sample") %>% 
   select(-type) %>% 
-  arrange(`sample-id`, name) %>% 
-  write.table(paste0("~/GenomeDK/clinmicrocore/pipe19/batch/mads/output/32092_Sseq_", arg_batch, ".csv"), sep = ";", fileEncoding = "cp1252", row.names = F)   # TODO: set output path for args
+
+  #arrange(`sample-id`, name) %>% # DO NOT SORT
+  write.table(paste0("~/GenomeDK/clinmicrocore/pipe19/batch/mads/output/32092_Sseq_", arg_batch, ".csv"), quote = F, sep = ";", fileEncoding = "cp1252", row.names = F)   # TODO: set output path for args
 
 
     
