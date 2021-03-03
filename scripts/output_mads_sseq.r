@@ -1,8 +1,6 @@
-###################################################################################
-# This script takes an xls with the columns "Originalnr.", "Primer" and "Rør nr",
-# and a table with the results of the csc-program.
-# The tables are joined and ultimately output i a format compatible with mads.
-
+###############################################################################
+# This script rummages through all the .xls files, and join the content to a 
+# eurofins sanger run.
 
 library(tidyverse)
 
@@ -28,22 +26,72 @@ if (devel) {
     devel = T
     
     arg_batch = "210214"
+    arg_batch = "210216"
     
-    metadata_file = paste0("~/GenomeDK/clinmicrocore/sanger/input/", arg_batch, ".xls")
-    csc_results_file = paste0("~/GenomeDK/clinmicrocore/sanger/output/", arg_batch, "/csc/", arg_batch, "_results.csv")
+    #metadata_file = paste0("~/GenomeDK/clinmicrocore/spike-sanger/input/", arg_batch, ".xls") # not used anymore as the files are now pooled together.
+    csc_results_file = paste0("~/GenomeDK/clinmicrocore/spike-sanger/output/", arg_batch, "/csc/", arg_batch, "_results.csv")
     
 }
 
 
 
 
+
+
+
+
+
+## Before we do anything, we want to concatenate all the metadata-files. Other
+
+collect_all_metadata = function(xls_path) {
+  xls_in = dir(xls_path, full.names = T)
+  
+  df = tibble()
+  for (i in xls_in) {
+    
+    write(paste0("Reading:\n  ", i), stderr())
+    
+    temp = readxl::read_excel(i, col_types = "text")
+    
+    write(paste0("Names:\n  ", paste(names(temp), collapse = ", "), stderr()))
+    #write("name", stderr())
+    #write(paste0(glimpse(df)), stderr())
+    temp = temp %>% 
+      select(ef_sample_name = `Stregkode nr`, kma_sample_name = `Originalnr.`, primer_raw = `Primer-bakke`) #%>% 
+      #drop_na()
+    
+    # Warn if any of the needed columns are missing.
+    # And also if excessive NA values exists.
+    
+    #paste(glimpse(temp))
+    
+    df = temp %>% bind_rows(df)
+    
+    write("", stdout())
+    
+  }
+  
+  df
+}
+
+
+metadata_read = collect_all_metadata("~/GenomeDK/clinmicrocore/spike-sanger/upload/total") 
+#metadata %>% select(
+
+
+
+
+
+
+# Below is the old metadata ingestion:
 #metadata = read_tsv(metadata_file)
 metadata_read = readxl::read_excel(metadata_file, sheet = 1, na = c("", "?"))
 
 metadata_read %>% glimpse
 metadata = metadata_read %>% 
-    select(kma_raw_sample_name = `Originalnr.`, primer_raw = Primer, ef_sample_name = `Rør nr`) %>% 
-    filter(!is.na(kma_raw_sample_name)) %>% 
+    #select(kma_raw_sample_name = `Originalnr.`, primer_raw = Primer, ef_sample_name = `Rør nr`) %>% 
+    #filter(!is.na(kma_raw_sample_name)) %>% 
+    drop_na(ef_sample_name) %>% 
     mutate(primer = case_when(str_detect(primer_raw, "^L-") ~ "left_primer",
                               str_detect(primer_raw, "^R-") ~ "right_primer"),
            plate = str_extract(primer_raw, "\\d+$")) %>%
@@ -73,7 +121,7 @@ metadata = metadata_read %>%
     ungroup() %>% 
     
     select(kma_ya_sample_name, kma_raw_sample_name, ef_sample_name, plate, primer, type)
-
+# Old metadata ingestion done.
 
 
     
@@ -255,7 +303,7 @@ out %>%
 
 
 
-identity
+
 
 
 

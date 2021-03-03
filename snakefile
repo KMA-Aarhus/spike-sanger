@@ -16,10 +16,11 @@ import re
 
 configfile: "config.json"
 
-
+input_table = config["input_table"]
 out_base = config["out_base"]
 
-df = pd.read_table("input_table.tsv", sep = "\t", dtype = str, comment = "#")
+
+df = pd.read_table(input_table, sep = "\t", dtype = str, comment = "#")
 
 print(df)
 print("//")
@@ -33,7 +34,7 @@ print(" -->")
 
 onerror:
     print("An error occurred")
-    shell("mail -s 'sanger pipeline error' kobel@pm.me < {log}")
+    shell("mail -s 'spike-sanger pipeline error' kobel@pm.me < {log}")
 
 
 
@@ -48,15 +49,13 @@ rule all:
 
 rule start:
     input:
-        "input/{batch}.xls"
+        input_table
     output:
         ab1_dir = directory("output/{batch}/ab1"),
         final = "output/{batch}/csc/{batch}_results.csv"
     params:
         reference = config["reference"],
         cp_in = lambda wildcards: df[df["batch"] == wildcards.batch]["raw_path"].values[0]
-
-                #lambda wildcards: df[df["full_name"]==wildcards.sample][["forward_path", "reverse_path"]].values[0].tolist()
     shell:
         """
         
@@ -64,7 +63,7 @@ rule start:
         cp {params.cp_in} {output.ab1_dir}
 
 
-        singularity run docker://cmkobel/covid-spike-classification \
+        singularity run docker://kblin/covid-spike-classification \
             covid-spike-classification \
                 --reference {params.reference} \
                 -i ab1 \
@@ -76,3 +75,6 @@ rule start:
 
         """
 
+
+
+# Now the data is generated, and we just need to generate some reports for mads.
