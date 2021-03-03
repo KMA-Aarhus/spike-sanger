@@ -41,7 +41,8 @@ onerror:
 
 rule all:
     input:
-        expand("output/{batch}/csc/{batch}_results.csv",
+        expand(["output/{batch}/csc/{batch}_results.csv",
+                "mads_out/32092_Sseq_{batch}.csv"],
                 batch = df["batch"])
 
 
@@ -78,3 +79,18 @@ rule start:
 
 
 # Now the data is generated, and we just need to generate some reports for mads.
+rule mads_out:
+    input:
+        "output/{batch}/csc/{batch}_results.csv"
+    output:
+        "mads_out/32092_Sseq_{batch}.csv"
+    shell:
+        """
+
+        singularity run docker://rocker/tidyverse \
+            Rscript scripts/output_mads_sseq.r {wildcards.batch} {input} {output}
+
+
+        """
+
+

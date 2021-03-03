@@ -7,14 +7,16 @@ library(tidyverse)
 
 args = commandArgs(trailingOnly=TRUE)
 write("These are the args:", stderr())
-write(paste(args), stderr())
+write(paste(1:length(args), args), stderr())
 write("", stderr())
 
 # Read cli-args
-#batch = args[1]
-metadata_file = args[1]
-csc_results = args[2]
+arg_batch = args[1]
+csc_results_file = args[2]
+final_out_file = args[3]
 
+
+#metadata_file = args[1] # deprecated as it pools all of them.
 
 
 devel = F
@@ -25,11 +27,27 @@ if (devel) {
     rm(list = ls())
     devel = T
     
-    arg_batch = "210214"
-    arg_batch = "210216"
+    #arg_batch = "210214"
+    #arg_batch = "210216"
+    #arg_batch = "11107265503-1"
     
     #metadata_file = paste0("~/GenomeDK/clinmicrocore/spike-sanger/input/", arg_batch, ".xls") # not used anymore as the files are now pooled together.
-    csc_results_file = paste0("~/GenomeDK/clinmicrocore/spike-sanger/output/", arg_batch, "/csc/", arg_batch, "_results.csv")
+    #csc_results_file = paste0("~/GenomeDK/clinmicrocore/spike-sanger/output/", arg_batch, "/csc/", arg_batch, "_results.csv")
+    #final_out_file = paste0("~/GenomeDK/clinmicrocore/spike-sanger/mads_out/32092_Sseq_", arg_batch, ".csv")
+    
+    
+    # taken directly from the snakefile:
+    #arg_batch = "11107289500-1"
+    #csc_results_file = "~/GenomeDK/clinmicrocore/spike-sanger/output/11107289500-1/csc/11107289500-1_results.csv"
+    #final_out_file = "~/GenomeDK/clinmicrocore/spike-sanger/mads_out/32092_Sseq_11107289500-1.csv"
+    
+    
+    # Another batch:
+    arg_batch = "11107267912-1"
+    csc_results_file = "~/GenomeDK/clinmicrocore/spike-sanger/output/11107267912-1/csc/11107267912-1_results.csv"
+    final_out_file = "~/GenomeDK/clinmicrocore/spike-sanger/mads_out/32092_Sseq_11107267912-1.csv"
+    
+    
     
 }
 
@@ -57,7 +75,8 @@ collect_all_metadata = function(xls_path) {
     #write("name", stderr())
     #write(paste0(glimpse(df)), stderr())
     temp = temp %>% 
-      select(ef_sample_name = `Stregkode nr`, kma_sample_name = `Originalnr.`, primer_raw = `Primer-bakke`) #%>% 
+      select(ef_sample_name = `Stregkode nr`, kma_raw_sample_name = `Originalnr.`, primer_raw = `Primer-bakke`) %>% 
+      mutate(table_file = basename(i))
       #drop_na()
     
     # Warn if any of the needed columns are missing.
@@ -74,7 +93,7 @@ collect_all_metadata = function(xls_path) {
   df
 }
 
-
+write("Collecting all metadata ...", stderr())
 metadata_read = collect_all_metadata("~/GenomeDK/clinmicrocore/spike-sanger/upload/total") 
 #metadata %>% select(
 
@@ -85,9 +104,10 @@ metadata_read = collect_all_metadata("~/GenomeDK/clinmicrocore/spike-sanger/uplo
 
 # Below is the old metadata ingestion:
 #metadata = read_tsv(metadata_file)
-metadata_read = readxl::read_excel(metadata_file, sheet = 1, na = c("", "?"))
+#metadata_read = readxl::read_excel(metadata_file, sheet = 1, na = c("", "?"))
 
 metadata_read %>% glimpse
+write("Transforming metadata ...", stderr())
 metadata = metadata_read %>% 
     #select(kma_raw_sample_name = `Originalnr.`, primer_raw = Primer, ef_sample_name = `Rør nr`) %>% 
     #filter(!is.na(kma_raw_sample_name)) %>% 
@@ -102,6 +122,9 @@ metadata = metadata_read %>%
                             str_detect(tolower(kma_raw_sample_name), "negativ|h2o|^empty|blank|tom|^neg|neg$") ~ "negative_control",
                             str_detect(tolower(kma_raw_sample_name), "^afd|^00") ~ "other",
                             TRUE ~ "sample")) %>% 
+    
+    # Consider warning about the samples that are missed here:
+    drop_na(kma_raw_sample_name) %>% 
     
     # convert the numbers to sample types
     mutate(sample_name_prefix = str_sub(kma_raw_sample_name, 1, 2), # first two characters
@@ -120,7 +143,7 @@ metadata = metadata_read %>%
                                     paste0(kma_raw_sample_name))) %>% 
     ungroup() %>% 
     
-    select(kma_ya_sample_name, kma_raw_sample_name, ef_sample_name, plate, primer, type)
+    select(kma_ya_sample_name, kma_raw_sample_name, ef_sample_name, plate, primer, type, table_file)
 # Old metadata ingestion done.
 
 
@@ -128,14 +151,26 @@ metadata = metadata_read %>%
 
 
 
-# Define position of interest
+# Define Positions Of Interest.
+# Please make sure all of these start with "Sseq_"
 poi = c("Sseq_E484K", "Sseq_N501Y", "Sseq_Q677H", "Sseq_P681H")
 
+
+# This dummy will make sure that missing columns are added. 
+# Should only be a problem when csc doesn't support the variants that SSI defines as necessary.
+dummy = tibble(nas = c(NA), cols_ = poi) %>% 
+  pivot_wider(names_from = cols_, values_from = nas) %>% 
+  mutate(ef_sample_name = "dummy") %>% 
+  select(ef_sample_name, everything())
+
+
+
 # Read csc-results
+write("reading csc-results ...", stderr())
 results_read = read_csv(csc_results_file, col_types = cols(.default = "c")) 
 results_read %>% glimpse
 results = results_read %>% 
-    mutate(ef_sample_name = str_remove(sample, "_.+$")) %>% 
+    mutate(ef_sample_name = str_remove(sample, "_.+$")) %>% # Clean the sample name.
     select(ef_sample_name, ef_raw_sample_name = sample, comment, everything()) %>% 
     
 
@@ -146,15 +181,31 @@ results = results_read %>%
     rename_at(.vars = vars(4:last_col()),
               .funs = ~ paste0("Sseq_", .x)) %>% 
   
+   
+    # add the dummy, and delete it again. 
+    # seems stupid, but remember that it adds NA-columns which will be very useful later!
+    bind_rows(dummy) %>% 
+    filter(ef_sample_name != "dummy") %>% 
+  
     # To make matters simpler, we're only interested in keeping the poi columns.
     select(ef_sample_name, ef_raw_sample_name, comment, all_of(poi))
 
 
 
 # Join the data together
-joined = metadata %>% 
-    left_join(results, by = "ef_sample_name") %>% 
-    arrange(kma_ya_sample_name)
+write("joining meta and results ...")
+joined = results %>% 
+    left_join(metadata, by = "ef_sample_name") %>% 
+    arrange(kma_ya_sample_name) %>% 
+  
+  
+    select(ef_sample_name, kma_ya_sample_name, comment, plate, primer, type, all_of(poi)) 
+  
+  
+
+    
+
+
     
     # Mark the overlapping samples
     #group_by(kma_ya_sample_name, type, comment) %>% 
@@ -167,12 +218,7 @@ joined = metadata %>%
 
 
 
-# This dummy will make sure that missing columns are added. 
-# Should only be a problem when csc doesn't support the variants that SSI defines necessary.
-dummy = tibble(nas = c(NA), cols_ = poi) %>% 
-    pivot_wider(names_from = cols_, values_from = nas) %>% 
-    mutate(kma_ya_sample_name = "dummy") %>% 
-    select(kma_ya_sample_name, everything())
+
     
 # add dummy records for keeping all relevant variants 
 # dummy = tibble(kma_ya_sample_name = "dummy-sample",
@@ -182,37 +228,52 @@ dummy = tibble(nas = c(NA), cols_ = poi) %>%
 
 
 # Trying a new approach. Long-pivoting the joined-table immediately:
+write("twin calling ...", stderr())
 twin_called = joined %>% 
-    select(kma_ya_sample_name, plate, type, primer, starts_with("Sseq_")) %>%
+    #select(kma_ya_sample_name, plate, type, primer, starts_with("Sseq_")) %>%
   
-    # Add dummy data to ensure that all poi columns will be present
-    bind_rows(tibble(kma_ya_sample_name = "dummy", type = "dummy", primer = "left_primer")) %>% 
-    left_join(dummy, by = "kma_ya_sample_name", suffix = c("", "_dummy")) %>% 
-    select(-ends_with("_dummy")) %>% 
-
+  
+    # Because the dummy is added before joining the tables, we now have to come in and add some information.
+    # We need to ensure the presence of both primers, otherwise the later pivot will fail.
+    bind_rows(tibble(kma_ya_sample_name = "dummy2", primer = c("left_primer", "right_primer"))) %>% 
+  
+    # Alternatively to "starts_with()", one could use "all_of()"
     pivot_longer(starts_with("Sseq_"), names_to = "position", values_to = "call") %>% 
   
 
     
   
-    # Recode the calls 
+    # Recode the calls before splitting the directions out into distinct columns.
     mutate(call = recode(call, "0" = "negativ", "1" = "positiv")) %>% # hold ikke-kaldte som NA, så man senere kan coalesce den første kaldte værdi.
     
+  
+    # We do not need the dummy any more.
+    #filter(ef_sample_name != "dummy") %>%   
+    # I moved this up earlier. Hence the commenting.
     
+  
     # Have a look
-    arrange(kma_ya_sample_name, position) %>% 
+    #arrange(kma_ya_sample_name, position) %>% View
+
+    
   
     # pivot left and right out to two columns
     #mutate(both = paste(position, primer)) %>% 
     pivot_wider(id_cols = c(kma_ya_sample_name, plate, position, type), names_from = primer, values_from = call) %>% 
-     
-    # Have a look
-    #View
+      
+    # Immediately after this pivot, we can remove the second dummy
+    filter(kma_ya_sample_name != "dummy2") %>% 
+    
+    
   
     # Now call the variants using both directions
-    mutate(twin_call = case_when(`left_primer` == `right_primer` ~ `left_primer`,
-                                 is.na(`left_primer`) | is.na(`right_primer`) ~ coalesce(`left_primer`, `right_primer`, "inkonklusiv_begge"),
-                                 TRUE ~ "inkonklusiv_forskellig"))
+    mutate(twin_call = case_when(`left_primer` == `right_primer` ~ `left_primer`,     # Hvis de er enige, så skriv det de er enige om
+                                 is.na(`left_primer`) | is.na(`right_primer`) ~ coalesce(`left_primer`, `right_primer`, "inkonklusiv_begge"), # Hvis en er NA, så skriv den anden. Når begge er NA skal der stå "inkonklusiv begge".
+                                 TRUE ~ "inkonklusiv_forskellig")) %>%                # Ellers, ved uenighed, skal der stå inkonklusiv forskellig".
+
+  
+    #drop_na()  
+    identity
   
     # 
     # 
@@ -228,25 +289,18 @@ twin_called = joined %>%
 # TODO: Warn about non-passing negative controls
 
 
-
-
-
-
 # Warn about differing cals between the two directions
 inc_differing = twin_called %>% filter(twin_call == "inkonklusiv_forskellig")
 if (nrow(inc_differing) > 0) {
   write(paste("Warning: discrepancies beween the two directions in the following samples:\n",
               paste(inc_differing %>% pull(kma_ya_sample_name), collapse = "\t")), stderr())
+} else {
+  write(paste("Info: No disrepancies when comparing the two directions between the samples."))
 }
 
 
 
-# 
-# definition = tribble(
-#   ~Sseq_variantbeskrivelse, ~Sseq_smitsomhed, ~Sseq_E848K, ~
-
-
-
+write("applying conditionals ...", stderr())
 out = twin_called %>% 
 
   
@@ -286,6 +340,8 @@ out = twin_called %>%
 #out %>% format_tsv
 
 
+
+write("writing file out", stderr())
 out %>% 
   
   pivot_longer(c(Sseq_variantbeskrivelse, Sseq_smitsomhed, starts_with("Sseq_"))) %>% 
@@ -294,11 +350,13 @@ out %>%
   select(-type) %>% 
 
   #arrange(`sample-id`, name) %>% # DO NOT SORT
-  write.table(paste0("~/GenomeDK/clinmicrocore/pipe19/batch/mads/output/32092_Sseq_", arg_batch, ".csv"), quote = F, sep = ";", fileEncoding = "cp1252", row.names = F)   # TODO: set output path for args
-
+  write.table(final_out_file, quote = F, sep = ";", fileEncoding = "cp1252", row.names = F)   # TODO: set output path for args
+  
 
     
-
+# Overvej at der måske også skal printes en debug tabel, hvor man kan se hvad der går galt med hvilke prøver..
+# Bare så det er lidt nemmere at tjekke, at alt er i orden.
+# For kørslen af batch *267912-1 er der fx. ingen right_primer's til stede?!?
 
 
 
