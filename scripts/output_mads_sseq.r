@@ -14,6 +14,7 @@ write("", stderr())
 arg_batch = args[1]
 csc_results_file = args[2]
 final_out_file = args[3]
+xls_path_ = "input/total"
 
 
 #metadata_file = args[1] # deprecated as it pools all of them.
@@ -44,6 +45,7 @@ if (devel) {
     
     # Another batch:
     arg_batch = "11107267912-1"
+    xls_path_ = "~/GenomeDK/clinmicrocore/spike-sanger/input/total"
     csc_results_file = "~/GenomeDK/clinmicrocore/spike-sanger/output/11107267912-1/csc/11107267912-1_results.csv"
     final_out_file = "~/GenomeDK/clinmicrocore/spike-sanger/mads_out/32092_Sseq_11107267912-1.csv"
     
@@ -62,7 +64,9 @@ if (devel) {
 ## Before we do anything, we want to concatenate all the metadata-files. Other
 
 collect_all_metadata = function(xls_path) {
+  write("reading dirs:", stdout())
   xls_in = dir(xls_path, full.names = T)
+  write(paste("xls_in:", xls_in), stdout())
   
   df = tibble()
   for (i in xls_in) {
@@ -72,6 +76,7 @@ collect_all_metadata = function(xls_path) {
     temp = readxl::read_excel(i, col_types = "text")
     
     write(paste0("Names:\n  ", paste(names(temp), collapse = ", "), stderr()))
+    
     #write("name", stderr())
     #write(paste0(glimpse(df)), stderr())
     temp = temp %>% 
@@ -81,8 +86,10 @@ collect_all_metadata = function(xls_path) {
     
     # Warn if any of the needed columns are missing.
     # And also if excessive NA values exists.
+  
     
-    #paste(glimpse(temp))
+    write(paste0("Samples read:\n  ", dim(temp)[1]), stderr())
+    
     
     df = temp %>% bind_rows(df)
     
@@ -94,7 +101,8 @@ collect_all_metadata = function(xls_path) {
 }
 
 write("Collecting all metadata ...", stderr())
-metadata_read = collect_all_metadata("~/GenomeDK/clinmicrocore/spike-sanger/upload/total") 
+metadata_read = collect_all_metadata(xls_path_) 
+
 #metadata %>% select(
 
 
@@ -225,9 +233,11 @@ joined = results %>%
 #                type = "dummy",
 #                position = poi)
 
+joined %>% write_tsv("joined_before_twincalling.tsv")~
 
 
 # Trying a new approach. Long-pivoting the joined-table immediately:
+#Kunne man ikke på en eller anden måde, få twin_called til at indeholde de to ef_sample_names der indgår i mads-prøven?
 write("twin calling ...", stderr())
 twin_called = joined %>% 
     #select(kma_ya_sample_name, plate, type, primer, starts_with("Sseq_")) %>%
@@ -241,11 +251,14 @@ twin_called = joined %>%
     pivot_longer(starts_with("Sseq_"), names_to = "position", values_to = "call") %>% 
   
 
+  
+
     
   
     # Recode the calls before splitting the directions out into distinct columns.
     mutate(call = recode(call, "0" = "negativ", "1" = "positiv")) %>% # hold ikke-kaldte som NA, så man senere kan coalesce den første kaldte værdi.
-    
+
+    #write_tsv("temp3_before_pivot_just_called.tsv")    
   
     # We do not need the dummy any more.
     #filter(ef_sample_name != "dummy") %>%   
@@ -255,11 +268,13 @@ twin_called = joined %>%
     # Have a look
     #arrange(kma_ya_sample_name, position) %>% View
 
-    
+
   
     # pivot left and right out to two columns
     #mutate(both = paste(position, primer)) %>% 
     pivot_wider(id_cols = c(kma_ya_sample_name, plate, position, type), names_from = primer, values_from = call) %>% 
+    unnest %>% 
+    #write_tsv("temp4_just_pivoted.tsv")
       
     # Immediately after this pivot, we can remove the second dummy
     filter(kma_ya_sample_name != "dummy2") %>% 
@@ -282,6 +297,12 @@ twin_called = joined %>%
     # 
     # View
 
+
+
+
+
+# I'm saving this table to disk as well, because it is nice to have something to debug with.
+twin_called %>% write_tsv(paste0(dirname(final_out_file), "/debug1_Sseq_", arg_batch, ".tsv"))
 
 
 
@@ -337,7 +358,8 @@ out = twin_called %>%
     
       
 
-#out %>% format_tsv
+# I'm saving this table to disk as well, because it is nice to have something to debug with.
+out %>% write_tsv(paste0(dirname(final_out_file), "/debug2_Sseq_", arg_batch, ".tsv"))
 
 
 
@@ -349,7 +371,7 @@ out %>%
   filter(type == "sample") %>% 
   select(-type) %>% 
 
-  #arrange(`sample-id`, name) %>% # DO NOT SORT
+  # DO NOT SORT
   write.table(final_out_file, quote = F, sep = ";", fileEncoding = "cp1252", row.names = F)   # TODO: set output path for args
   
 
