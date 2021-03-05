@@ -27,6 +27,8 @@ devel = F
 if (devel) {
     rm(list = ls())
     devel = T
+    xls_path_ = "~/GenomeDK/clinmicrocore/spike-sanger/input/total"
+    
     
     #arg_batch = "210214"
     #arg_batch = "210216"
@@ -44,10 +46,14 @@ if (devel) {
     
     
     # Another batch:
-    arg_batch = "11107267912-1"
-    xls_path_ = "~/GenomeDK/clinmicrocore/spike-sanger/input/total"
-    csc_results_file = "~/GenomeDK/clinmicrocore/spike-sanger/output/11107267912-1/csc/11107267912-1_results.csv"
-    final_out_file = "~/GenomeDK/clinmicrocore/spike-sanger/mads_out/32092_Sseq_11107267912-1.csv"
+    # arg_batch = "11107267912-1"
+    # csc_results_file = "~/GenomeDK/clinmicrocore/spike-sanger/output/11107267912-1/csc/11107267912-1_results.csv"
+    # final_out_file = "~/GenomeDK/clinmicrocore/spike-sanger/mads_out/32092_Sseq_11107267912-1.csv"
+    
+    # Yet another
+    arg_batch = "11107294571-1"
+    csc_results_file = "~/GenomeDK/clinmicrocore/spike-sanger/output/11107294571-1/csc/11107294571-1_results.csv"
+    final_out_file = "~/GenomeDK/clinmicrocore/spike-sanger/mads_out/32092_Sseq_11107294571-1.csv"
     
     
     
@@ -180,6 +186,8 @@ results_read %>% glimpse
 results = results_read %>% 
     mutate(ef_sample_name = str_remove(sample, "_.+$")) %>% # Clean the sample name.
     select(ef_sample_name, ef_raw_sample_name = sample, comment, everything()) %>% 
+  
+  
     
 
 
@@ -196,7 +204,7 @@ results = results_read %>%
     filter(ef_sample_name != "dummy") %>% 
   
     # To make matters simpler, we're only interested in keeping the poi columns.
-    select(ef_sample_name, ef_raw_sample_name, comment, all_of(poi))
+    select(ef_sample_name, comment, all_of(poi))
 
 
 
@@ -207,11 +215,35 @@ joined = results %>%
     arrange(kma_ya_sample_name) %>% 
   
   
-    select(ef_sample_name, kma_ya_sample_name, comment, plate, primer, type, all_of(poi)) 
+  
+  
+    select(ef_sample_name, kma_ya_sample_name, comment, plate, primer, type, all_of(poi))
+  
+  
+    
+    # Quick and dirty way of removing duplicated names:
+    #distinct(kma_ya_sample_name, plate, primer, .keep_all = T)
+    # I have chosen to a use a different quick and dirty method further down: use the "first()" summary function for picking unique values in pivot wider for twin_calling
+
+    # # Set a rank that shows duplicated names
+    # group_by(kma_ya_sample_name) %>%
+    # mutate(dup_rank = row_number())
+    # 
+
   
   
 
+# This block is deprecated since duplicates are removed catastrophically.
+# Now where we have joined the the results and metadata, we can check that there is ONLY TWO samples per sample name.
+# I have had some problems with duplicated names for negative controls
+# dup_names = joined %>% 
+#   count(kma_ya_sample_name) %>% 
+#   filter(n > 2) %>% 
+#   pull(kma_ya_sample_name)
+# write(paste("Warning: duplicated names for:", dup_names), stderr())
+#   
     
+
 
 
     
@@ -233,7 +265,7 @@ joined = results %>%
 #                type = "dummy",
 #                position = poi)
 
-joined %>% write_tsv("joined_before_twincalling.tsv")~
+#joined %>% write_tsv("joined_before_twincalling.tsv")
 
 
 # Trying a new approach. Long-pivoting the joined-table immediately:
@@ -250,6 +282,7 @@ twin_called = joined %>%
     # Alternatively to "starts_with()", one could use "all_of()"
     pivot_longer(starts_with("Sseq_"), names_to = "position", values_to = "call") %>% 
   
+    
 
   
 
@@ -260,6 +293,8 @@ twin_called = joined %>%
 
     #write_tsv("temp3_before_pivot_just_called.tsv")    
   
+    
+  
     # We do not need the dummy any more.
     #filter(ef_sample_name != "dummy") %>%   
     # I moved this up earlier. Hence the commenting.
@@ -268,12 +303,13 @@ twin_called = joined %>%
     # Have a look
     #arrange(kma_ya_sample_name, position) %>% View
 
-
   
     # pivot left and right out to two columns
     #mutate(both = paste(position, primer)) %>% 
-    pivot_wider(id_cols = c(kma_ya_sample_name, plate, position, type), names_from = primer, values_from = call) %>% 
-    unnest %>% 
+    arrange(is.na(call)) %>% 
+    pivot_wider(id_cols = c(kma_ya_sample_name, plate, position, type), names_from = primer, values_from = call, values_fn = first) %>% 
+    
+    
     #write_tsv("temp4_just_pivoted.tsv")
       
     # Immediately after this pivot, we can remove the second dummy
@@ -285,7 +321,7 @@ twin_called = joined %>%
     mutate(twin_call = case_when(`left_primer` == `right_primer` ~ `left_primer`,     # Hvis de er enige, så skriv det de er enige om
                                  is.na(`left_primer`) | is.na(`right_primer`) ~ coalesce(`left_primer`, `right_primer`, "inkonklusiv_begge"), # Hvis en er NA, så skriv den anden. Når begge er NA skal der stå "inkonklusiv begge".
                                  TRUE ~ "inkonklusiv_forskellig")) %>%                # Ellers, ved uenighed, skal der stå inkonklusiv forskellig".
-
+    
   
     #drop_na()  
     identity
@@ -302,7 +338,7 @@ twin_called = joined %>%
 
 
 # I'm saving this table to disk as well, because it is nice to have something to debug with.
-twin_called %>% write_tsv(paste0(dirname(final_out_file), "/debug1_Sseq_", arg_batch, ".tsv"))
+#twin_called %>% write_tsv(paste0(dirname(final_out_file), "/debug1_Sseq_", arg_batch, ".tsv"))
 
 
 
@@ -384,48 +420,5 @@ out %>%
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-    
     
     

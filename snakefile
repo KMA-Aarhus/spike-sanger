@@ -42,7 +42,8 @@ onerror:
 rule all:
     input:
         expand(["output/{batch}/csc/{batch}_results.csv",
-                "mads_out/32092_Sseq_{batch}.csv"],
+                "output/{batch}/32092_Sseq_{batch}.csv",
+                "output/{batch}/32092_Sseq_{batch}_mail_sent.flag"],
                 batch = df["batch"])
 
 
@@ -57,6 +58,7 @@ rule start:
     params:
         reference = config["reference"],
         cp_in = lambda wildcards: df[df["batch"] == wildcards.batch]["raw_path"].values[0]
+    container: "docker://kblin/covid-spike-classification"
     shell:
         """
         
@@ -64,12 +66,11 @@ rule start:
         cp {params.cp_in} {output.ab1_dir}
 
 
-        singularity run docker://kblin/covid-spike-classification \
-            covid-spike-classification \
-                --reference {params.reference} \
-                -i ab1 \
-                --outdir output/{wildcards.batch}/csc \
-                {output.ab1_dir}
+        covid-spike-classification \
+            --reference {params.reference} \
+            -i ab1 \
+            --outdir output/{wildcards.batch}/csc \
+            {output.ab1_dir}
 
         mv output/{wildcards.batch}/csc/results.csv {output.final}
 
@@ -83,13 +84,27 @@ rule mads_out:
     input:
         "output/{batch}/csc/{batch}_results.csv"
     output:
-        "mads_out/32092_Sseq_{batch}.csv"
+        "output/{batch}/32092_Sseq_{batch}.csv"
+    container: "docker://rocker/tidyverse"
     shell:
         """
 
-        singularity run docker://rocker/tidyverse \
-            Rscript scripts/output_mads_sseq.r {wildcards.batch} {input} {output}
+    
+        Rscript scripts/output_mads_sseq.r {wildcards.batch} {input} {output}
 
+
+        """
+
+rule send_mail:
+    input: "output/{batch}/32092_Sseq_{batch}.csv"
+    output: "output/{batch}/32092_Sseq_{batch}_mail_sent.flag"
+    shell:
+        """
+        
+        
+        mail -v -s "Automail: mads Sseq-svar" -a {input} carkob@rm.dk <<< "Autogenereret mads svar for Eurofins sanger-sekventeringsbatch: {wildcards.batch}\nMutationssignaturerne er senest opdateret d. 16. feb. 2021.\n\nGenereret med $(pwd)/snakefile."
+
+        touch {output}
 
         """
 
